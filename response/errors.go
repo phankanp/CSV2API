@@ -1,17 +1,28 @@
 package response
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
-type Error struct {
-	Code    int
-	Message string
+type HTTPError struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Code    int    `json:"code"`
 }
 
-var (
-	ErrInternal = &Error{
-		Code:    http.StatusInternalServerError,
-		Message: "Internal server response",
+func ErrorResponse(w http.ResponseWriter, err error, message string, code int) {
+	errObj := HTTPError{
+		Error:   err.Error(),
+		Message: message,
+		Code:    code,
 	}
-)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	err = json.NewEncoder(w).Encode(errObj)
+
+	if err != nil {
+		fmt.Fprintf(w, "%s", err.Error())
+	}
+}
