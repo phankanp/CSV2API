@@ -43,7 +43,7 @@ func (server *Server) Initialize(config *config.Config) {
 	}
 
 	server.Cache = conn
-	server.DB.AutoMigrate(&model.User{})
+	server.DB.AutoMigrate(&model.User{}, &model.Document{}, &model.Details{})
 	server.Router = mux.NewRouter()
 	server.InitializeRoutes()
 
