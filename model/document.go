@@ -21,23 +21,23 @@ type Document struct {
 	ID        uuid.UUID `gorm:"primary_key;" json:"id"`
 	UserID    uuid.UUID `json:"-"`
 	Title     string    `gorm:"size:255;not null" json:"title"`
-	Header    []Header  `gorm:"not null" json:"-"`
-	Data      []Details `gorm:"OnDelete:SET NULL;" json:"data"`
+	Header    []Header  `gorm:"not null" json:"headers"`
+	Row       []Row     `gorm:"OnDelete:SET NULL;" json:"rows"`
 	CreatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 }
 
-type Details struct {
+type Row struct {
 	ID         uint      `gorm:"primary_key;auto_increment" json:"id"`
 	DocumentID uuid.UUID `gorm:"not null" json:"-"`
-	Data       JSONB     `type:jsonb not null default '{}'::jsonb json:"data"`
+	Data       JSONB     `type:"jsonb not null default '{}'::jsonb" json:"data"`
 	CreatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 	UpdatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 }
 
 type Header struct {
-	ID         uint      `gorm:"primary_key;auto_increment" json:"id"`
-	DocumentID uuid.UUID `gorm:"not null" json:"document_id"`
+	ID         uint      `gorm:"primary_key;auto_increment" json:"-"`
+	DocumentID uuid.UUID `gorm:"not null" json:"-"`
 	Name       string    `gorm:"not null" json:"name"`
 }
 
@@ -72,11 +72,11 @@ func (d *Document) PrepareDocument(fname string, uid uuid.UUID) {
 	d.UpdatedAt = time.Now()
 }
 
-func (d *Details) PrepareDetails(uid uuid.UUID, data JSONB) {
-	d.DocumentID = uid
-	d.Data = data
-	d.CreatedAt = time.Now()
-	d.UpdatedAt = time.Now()
+func (r *Row) PrepareDetails(uid uuid.UUID, data JSONB) {
+	r.DocumentID = uid
+	r.Data = data
+	r.CreatedAt = time.Now()
+	r.UpdatedAt = time.Now()
 }
 
 func (h *Header) PrepareHeader(docID uuid.UUID, name string) {
@@ -101,15 +101,15 @@ func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB
 		return &Document{}, err
 	}
 
-	details := []Details{}
+	rows := []Row{}
 
-	err = db.Model(&Details{}).Where("document_id = ?", d.ID).Find(&details).Error
+	err = db.Model(&Row{}).Where("document_id = ?", d.ID).Find(&rows).Error
 
 	if err != nil {
 		return &Document{}, err
 	}
 
-	d.Data = details
+	d.Row = rows
 
 	return d, nil
 }
@@ -138,13 +138,13 @@ func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 			val, err := dict.Value()
 			dict.Scan(val)
 
-			details := Details{}
+			rows := Row{}
 			if err != nil {
 				return err
 			}
-			details.PrepareDetails(d.ID, dict)
+			rows.PrepareDetails(d.ID, dict)
 
-			err = db.Create(&details).Error
+			err = db.Create(&rows).Error
 
 			if err != nil {
 				return err
@@ -183,7 +183,7 @@ func (d *Document) CreateHeaders(db *gorm.DB, docHeaders []string) ([]Header, er
 func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, error) {
 	var err error
 
-	err = db.Model(&Document{}).Where("id = ?", docID).Preload("Data").Take(&d).Error
+	err = db.Model(&Document{}).Where("id = ?", docID).Preload("Row").Take(&d).Error
 
 	if err != nil {
 		return &Document{}, err
@@ -195,14 +195,21 @@ func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, err
 func (d *Document) DeleteDocument(db *gorm.DB, docID uuid.UUID) (int64, error) {
 	var err error
 
-	db1 := db.Model(&Details{}).Where("document_id = ?", docID).Take(&Details{}).Delete(&Details{})
-	if db1.Error != nil {
+	dbRow := db.Model(&Row{}).Where("document_id = ?", docID).Take(&Row{}).Delete(&Row{})
+
+	if dbRow.Error != nil {
 		return 0, err
 	}
 
-	db2 := db.Model(&Document{}).Where("id = ?", docID).Take(&Document{}).Delete(&Document{})
+	dbHeader := db.Model(&Header{}).Where("document_id = ?", docID).Take(&Header{}).Delete(&Header{})
 
-	if db2.Error != nil {
+	if dbHeader.Error != nil {
+		return 0, err
+	}
+
+	dbDocument := db.Model(&Document{}).Where("id = ?", docID).Take(&Document{}).Delete(&Document{})
+
+	if dbDocument.Error != nil {
 		return 0, err
 	}
 
