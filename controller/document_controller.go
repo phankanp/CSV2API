@@ -53,7 +53,7 @@ func (server *Server) GetDocument(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, d)
 }
 
-func (server *Server) UploadHandler(w http.ResponseWriter, r *http.Request) {
+func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Request) {
 	sessionToken, err := auth.GetSessionToken(r)
 
 	if err != nil {
@@ -147,7 +147,6 @@ func (server *Server) UploadHandler(w http.ResponseWriter, r *http.Request) {
 		case data := <-resCh:
 			documents = append(documents, data)
 		case <-doneCh:
-			println("test")
 			response.JsonResponse(w, http.StatusOK, documents)
 			return
 		}
@@ -198,4 +197,71 @@ func (server *Server) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JsonResponse(w, http.StatusOK, "")
+}
+
+func (server *Server) UploadHandler(w http.ResponseWriter, r *http.Request) {
+	sessionToken, err := auth.GetSessionToken(r)
+
+	if err != nil {
+		if err == http.ErrNoCookie {
+			response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		response.ErrorResponse(w, err, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	userEmail, err := auth.GetUserEmailFromSessionToken(server.Cache, sessionToken)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if userEmail == "" {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	user := &model.User{}
+
+	authenticatedUser, err := user.GetUserByEmail(server.DB, userEmail)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = r.ParseMultipartForm(200000)
+	if err != nil {
+		fmt.Fprintln(w, err)
+		return
+	}
+
+	formdata := r.MultipartForm
+
+	files := formdata.File["multiplefiles"]
+	titles := formdata.Value["title"]
+
+	documents := make([]*model.Document, 0)
+
+	for i, _ := range files {
+		file := files[i]
+		fname := titles[i]
+
+		f, err := file.Open()
+		defer f.Close()
+
+		if err != nil {
+			return
+		}
+
+		doc := model.Document{}
+
+		data, err := doc.CreateDocument(f, fname, server.DB, authenticatedUser)
+
+		documents = append(documents, data)
+
+	}
+	response.JsonResponse(w, http.StatusOK, documents)
 }

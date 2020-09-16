@@ -79,6 +79,11 @@ func (d *Details) PrepareDetails(uid uuid.UUID, data JSONB) {
 	d.UpdatedAt = time.Now()
 }
 
+func (h *Header) PrepareHeader(docID uuid.UUID, name string) {
+	h.DocumentID = docID
+	h.Name = name
+}
+
 func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB, authenticatedUser *User) (*Document, error) {
 	var err error
 
@@ -112,7 +117,7 @@ func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB
 func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 	r := csv.NewReader(file)
 
-	var header []string
+	var docHeaders []string
 
 	for {
 		record, err := r.Read()
@@ -122,12 +127,12 @@ func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if header == nil {
-			header = record
+		if docHeaders == nil {
+			docHeaders = record
 		} else {
 			dict := JSONB{}
-			for i := range header {
-				dict[header[i]] = record[i]
+			for i := range docHeaders {
+				dict[docHeaders[i]] = record[i]
 			}
 
 			val, err := dict.Value()
@@ -147,18 +152,32 @@ func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 		}
 	}
 
-	var headers []Header
+	headers, err := d.CreateHeaders(db, docHeaders)
 
-	for _, s := range header {
-		h := Header{}
-		h.DocumentID = d.ID
-		h.Name = s
-		headers = append(headers, h)
+	if err != nil {
+		return err
 	}
 
 	d.Header = headers
 
 	return nil
+}
+
+func (d *Document) CreateHeaders(db *gorm.DB, docHeaders []string) ([]Header, error) {
+	headers := make([]Header, 0)
+
+	for _, s := range docHeaders {
+		h := Header{}
+		h.PrepareHeader(d.ID, s)
+		err := db.Create(&h).Error
+
+		if err != nil {
+			return []Header{}, err
+		}
+
+		headers = append(headers, h)
+	}
+	return headers, nil
 }
 
 func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, error) {
