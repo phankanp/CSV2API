@@ -111,8 +111,28 @@ func (u *User) CheckCredentials(db *gorm.DB, email string, password string) (str
 	ok := auth.CheckPasswordHash(u.Password, password)
 
 	if !ok {
-		return "", err
+		return "", errors.New("invalid password")
 	}
 
 	return u.Email, nil
+}
+
+func (u *User) AuthenticateUser(db *gorm.DB, username string) (*User, error) {
+	err := db.Model(&User{}).Where("username = ?", username).Take(&u).Error
+
+	if err != nil {
+		return &User{}, err
+	}
+
+	return u, nil
+}
+
+func (u *User) GetUserByEmail(db *gorm.DB, email string) (*User, error) {
+	err := db.Model(&User{}).Where("email = ?", email).Take(&u).Error
+
+	if err != nil {
+		return &User{}, err
+	}
+
+	return u, nil
 }

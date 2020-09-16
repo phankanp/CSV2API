@@ -17,6 +17,7 @@ func (server *Server) Register(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
 	}
 
 	user.Prepare()
@@ -24,12 +25,14 @@ func (server *Server) Register(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
 	}
 
 	registeredUserAuthKey, err := user.CreateUser(server.DB)
 
 	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	response.JsonResponse(w, http.StatusOK, registeredUserAuthKey)
@@ -42,12 +45,14 @@ func (server *Server) Login(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
 	}
 
 	email, err := user.CheckCredentials(server.DB, user.Email, user.Password)
 
 	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
 	}
 
 	sessionToken := uuid.NewRandom().String()
@@ -56,6 +61,7 @@ func (server *Server) Login(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	http.SetCookie(w, &http.Cookie{
