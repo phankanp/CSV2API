@@ -18,20 +18,27 @@ import (
 type JSONB map[string]interface{}
 
 type Document struct {
-	ID        uuid.UUID `gorm:"primary_key;auto_increment" json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
+	ID        uuid.UUID `gorm:"primary_key;" json:"id"`
+	UserID    uuid.UUID `json:"-"`
 	Title     string    `gorm:"size:255;not null" json:"title"`
-	Data      []Details `json:"data"`
-	CreatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
+	Header    []Header  `gorm:"not null" json:"-"`
+	Data      []Details `gorm:"OnDelete:SET NULL;" json:"data"`
+	CreatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
+	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 }
 
 type Details struct {
 	ID         uint      `gorm:"primary_key;auto_increment" json:"id"`
+	DocumentID uuid.UUID `gorm:"not null" json:"-"`
+	Data       JSONB     `type:jsonb not null default '{}'::jsonb json:"data"`
+	CreatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
+	UpdatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
+}
+
+type Header struct {
+	ID         uint      `gorm:"primary_key;auto_increment" json:"id"`
 	DocumentID uuid.UUID `gorm:"not null" json:"document_id"`
-	Data       JSONB     `type:jsonb not null default '{}'::jsonb`
-	CreatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
+	Name       string    `gorm:"not null" json:"name"`
 }
 
 func (j JSONB) Value() (driver.Value, error) {
@@ -57,9 +64,9 @@ func (j *JSONB) Scan(value interface{}) error {
 	return nil
 }
 
-func (d *Document) PrepareDocument(fname string) {
+func (d *Document) PrepareDocument(fname string, uid uuid.UUID) {
 	d.ID = uuid.NewRandom()
-	d.UserID = uuid.NewRandom()
+	d.UserID = uid
 	d.Title = strings.TrimSpace(fname)
 	d.CreatedAt = time.Now()
 	d.UpdatedAt = time.Now()
@@ -72,10 +79,10 @@ func (d *Details) PrepareDetails(uid uuid.UUID, data JSONB) {
 	d.UpdatedAt = time.Now()
 }
 
-func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB) (*Document, error) {
+func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB, authenticatedUser *User) (*Document, error) {
 	var err error
 
-	d.PrepareDocument(fname)
+	d.PrepareDocument(fname, authenticatedUser.ID)
 
 	err = db.Create(&d).Error
 
@@ -83,7 +90,7 @@ func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB
 		return &Document{}, err
 	}
 
-	err = CSV2Map(file, d.ID, db)
+	err = CSV2Map(file, d, db)
 
 	if err != nil {
 		return &Document{}, err
@@ -102,7 +109,7 @@ func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB
 	return d, nil
 }
 
-func CSV2Map(file multipart.File, uid uuid.UUID, db *gorm.DB) error {
+func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 	r := csv.NewReader(file)
 
 	var header []string
@@ -130,7 +137,7 @@ func CSV2Map(file multipart.File, uid uuid.UUID, db *gorm.DB) error {
 			if err != nil {
 				return err
 			}
-			details.PrepareDetails(uid, dict)
+			details.PrepareDetails(d.ID, dict)
 
 			err = db.Create(&details).Error
 
@@ -140,5 +147,45 @@ func CSV2Map(file multipart.File, uid uuid.UUID, db *gorm.DB) error {
 		}
 	}
 
+	var headers []Header
+
+	for _, s := range header {
+		h := Header{}
+		h.DocumentID = d.ID
+		h.Name = s
+		headers = append(headers, h)
+	}
+
+	d.Header = headers
+
 	return nil
+}
+
+func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, error) {
+	var err error
+
+	err = db.Model(&Document{}).Where("id = ?", docID).Preload("Data").Take(&d).Error
+
+	if err != nil {
+		return &Document{}, err
+	}
+
+	return d, nil
+}
+
+func (d *Document) DeleteDocument(db *gorm.DB, docID uuid.UUID) (int64, error) {
+	var err error
+
+	db1 := db.Model(&Details{}).Where("document_id = ?", docID).Take(&Details{}).Delete(&Details{})
+	if db1.Error != nil {
+		return 0, err
+	}
+
+	db2 := db.Model(&Document{}).Where("id = ?", docID).Take(&Document{}).Delete(&Document{})
+
+	if db2.Error != nil {
+		return 0, err
+	}
+
+	return db.RowsAffected, nil
 }
