@@ -1,17 +1,54 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gorilla/mux"
-	"github.com/pborman/uuid"
-	"github.com/phankanp/csv-to-json/auth"
-	"github.com/phankanp/csv-to-json/model"
-	"github.com/phankanp/csv-to-json/response"
 	"mime/multipart"
 	"net/http"
 	"sync"
+
+	"github.com/gorilla/mux"
+	"github.com/pborman/uuid"
+	"github.com/phankanp/csv-to-json/auth"
+	"github.com/phankanp/csv-to-json/helper"
+	"github.com/phankanp/csv-to-json/model"
+	"github.com/phankanp/csv-to-json/response"
 )
+
+func (server *Server) GetDocuments(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+
+	d, err := document.GetDocuments(server.DB, user.ID)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, d)
+}
 
 func (server *Server) GetDocument(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -32,11 +69,6 @@ func (server *Server) GetDocument(w http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		err = errors.New("invalid api key")
-		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	if err != nil {
 		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
 		return
 	}
@@ -264,4 +296,351 @@ func (server *Server) UploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	}
 	response.JsonResponse(w, http.StatusOK, documents)
+}
+
+func (server *Server) GetDocumentRows(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+	docID := vars["docID"]
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+	retrievedDocument, err := document.GetDocumentByID(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !uuid.Equal(retrievedDocument.UserID, retrievedUser.ID) {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	row := &model.Row{}
+
+	rows, err := row.GetAllRowsByDocument(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, rows)
+}
+
+func (server *Server) CreateDocumentRow(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+	docID := vars["docID"]
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+	retrievedDocument, err := document.GetDocumentByID(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !uuid.Equal(retrievedDocument.UserID, retrievedUser.ID) {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	newRow := model.Row{}
+	rowData := model.JSONB{}
+	err = json.NewDecoder(r.Body).Decode(&rowData)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	headers, err := document.GetDocumentHeaders(server.DB)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	ok = helper.CompareHeaders(rowData, headers)
+
+	if !ok {
+		err := errors.New("data keys do not match csv headers")
+		response.ErrorResponse(w, err, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	createdRow, err := newRow.CreateRow(server.DB, uuid.Parse(docID), rowData)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, createdRow)
+}
+
+func (server *Server) GetDocumentRow(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+	docID := vars["docID"]
+	rowID, err := helper.IntFromString(vars["rowID"])
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+	}
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+	retrievedDocument, err := document.GetDocumentByID(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !uuid.Equal(retrievedDocument.UserID, retrievedUser.ID) {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	row := &model.Row{}
+
+	retrievedRow, err := row.GetRowByID(server.DB, uuid.Parse(docID), uint(rowID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, retrievedRow)
+}
+
+func (server *Server) UpdateDocumentRow(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+	docID := vars["docID"]
+	rowID, err := helper.IntFromString(vars["rowID"])
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+	retrievedDocument, err := document.GetDocumentByID(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !uuid.Equal(retrievedDocument.UserID, retrievedUser.ID) {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	row := &model.Row{}
+
+	retrievedRow, err := row.GetRowByID(server.DB, uuid.Parse(docID), uint(rowID))
+
+	updateRow := model.Row{}
+	rowData := model.JSONB{}
+	err = json.NewDecoder(r.Body).Decode(&rowData)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	headers, err := document.GetDocumentHeaders(server.DB)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	ok = helper.CompareHeaders(rowData, headers)
+
+	if !ok {
+		err := errors.New("data keys do not match csv headers")
+		response.ErrorResponse(w, err, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	updateRow.ID = retrievedRow.ID
+
+	updatedRow, err := updateRow.UpdateRow(server.DB, rowData)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, updatedRow)
+}
+
+func (server *Server) DeleteDocumentRow(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+	docID := vars["docID"]
+	rowID, err := helper.IntFromString(vars["rowID"])
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+	retrievedDocument, err := document.GetDocumentByID(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !uuid.Equal(retrievedDocument.UserID, retrievedUser.ID) {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	row := &model.Row{}
+
+	_, err = row.DeleteRow(server.DB, uuid.Parse(docID), uint(rowID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, "")
+}
+
+func (server *Server) SearchRows(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	apiKey := r.Context().Value("key").(string)
+	username := vars["username"]
+	docID := vars["docID"]
+	headerInput := vars["column"]
+	dataInput := vars["data"]
+
+	user := &model.User{}
+	retrievedUser, err := user.AuthenticateUser(server.DB, username)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ok := auth.CheckPasswordHash(retrievedUser.AuthKey, apiKey)
+
+	if !ok {
+		err = errors.New("invalid api key")
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	document := &model.Document{}
+	retrievedDocument, err := document.GetDocumentByID(server.DB, uuid.Parse(docID))
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !uuid.Equal(retrievedDocument.UserID, retrievedUser.ID) {
+		response.ErrorResponse(w, err, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	row := &model.Row{}
+	println("****************test3************")
+	rows, err := row.SearchRows(server.DB, uuid.Parse(docID), headerInput, dataInput)
+
+	if err != nil {
+		response.ErrorResponse(w, err, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response.JsonResponse(w, http.StatusOK, rows)
 }

@@ -1,18 +1,17 @@
 package model
 
 import (
-	"database/sql/driver"
 	"encoding/csv"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/pborman/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"io"
 	"log"
 	"mime/multipart"
 	"strings"
 	"time"
+
+	"github.com/pborman/uuid"
 )
 
 type JSONB map[string]interface{}
@@ -28,40 +27,17 @@ type Document struct {
 }
 
 type Row struct {
-	ID         uint      `gorm:"primary_key;auto_increment" json:"id"`
-	DocumentID uuid.UUID `gorm:"not null" json:"-"`
-	Data       JSONB     `type:"jsonb not null default '{}'::jsonb" json:"data"`
-	CreatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
-	UpdatedAt  time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
+	ID         uint           `gorm:"primary_key;auto_increment" json:"id"`
+	DocumentID uuid.UUID      `gorm:"not null" json:"-"`
+	Data       datatypes.JSON `type:"jsonb not null default '{}'::jsonb" json:"data"`
+	CreatedAt  time.Time      `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
+	UpdatedAt  time.Time      `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 }
 
 type Header struct {
 	ID         uint      `gorm:"primary_key;auto_increment" json:"-"`
 	DocumentID uuid.UUID `gorm:"not null" json:"-"`
 	Name       string    `gorm:"not null" json:"name"`
-}
-
-func (j JSONB) Value() (driver.Value, error) {
-	b, err := json.Marshal(j)
-	return b, err
-}
-
-func (j *JSONB) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("Failed to unmarshal JSONB value:", value))
-	}
-
-	i := JSONB{}
-	err := json.Unmarshal(bytes, &i)
-
-	if err != nil {
-		return err
-	}
-
-	*j = i
-
-	return nil
 }
 
 func (d *Document) PrepareDocument(fname string, uid uuid.UUID) {
@@ -72,8 +48,8 @@ func (d *Document) PrepareDocument(fname string, uid uuid.UUID) {
 	d.UpdatedAt = time.Now()
 }
 
-func (r *Row) PrepareDetails(uid uuid.UUID, data JSONB) {
-	r.DocumentID = uid
+func (r *Row) PrepareRow(docID uuid.UUID, data datatypes.JSON) {
+	r.DocumentID = docID
 	r.Data = data
 	r.CreatedAt = time.Now()
 	r.UpdatedAt = time.Now()
@@ -135,14 +111,15 @@ func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 				dict[docHeaders[i]] = record[i]
 			}
 
-			val, err := dict.Value()
-			dict.Scan(val)
+			j, err := json.Marshal(dict)
 
-			rows := Row{}
 			if err != nil {
 				return err
 			}
-			rows.PrepareDetails(d.ID, dict)
+
+			rows := Row{}
+
+			rows.PrepareRow(d.ID, j)
 
 			err = db.Create(&rows).Error
 
@@ -180,6 +157,18 @@ func (d *Document) CreateHeaders(db *gorm.DB, docHeaders []string) ([]Header, er
 	return headers, nil
 }
 
+func (d *Document) GetDocuments(db *gorm.DB, uid uuid.UUID) (*[]Document, error) {
+	documents := []Document{}
+
+	err := db.Model(&Document{}).Where("user_id = ?", uid).Preload("Row").Preload("Header").Find(&documents).Error
+
+	if err != nil {
+		return &[]Document{}, err
+	}
+
+	return &documents, nil
+}
+
 func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, error) {
 	var err error
 
@@ -214,4 +203,96 @@ func (d *Document) DeleteDocument(db *gorm.DB, docID uuid.UUID) (int64, error) {
 	}
 
 	return db.RowsAffected, nil
+}
+
+func (d *Document) GetDocumentHeaders(db *gorm.DB) ([]Header, error) {
+	headers := []Header{}
+
+	err := db.Model(&Header{}).Where("document_id = ?", d.ID).Find(&headers).Error
+
+	if err != nil {
+		return []Header{}, err
+	}
+
+	return headers, nil
+}
+
+func (r *Row) GetAllRowsByDocument(db *gorm.DB, docID uuid.UUID) (*[]Row, error) {
+	rows := []Row{}
+
+	err := db.Model(&Row{}).Where("document_id = ?", docID).Find(&rows).Error
+
+	if err != nil {
+		return &[]Row{}, err
+	}
+
+	return &rows, nil
+}
+
+func (r *Row) GetRowByID(db *gorm.DB, docID uuid.UUID, rowID uint) (*Row, error) {
+	err := db.Model(&Row{}).Where("document_id = ? AND id = ?", docID, rowID).Take(&r).Error
+
+	if err != nil {
+		return &Row{}, err
+	}
+
+	return r, nil
+}
+
+func (r *Row) CreateRow(db *gorm.DB, docID uuid.UUID, rowData JSONB) (*Row, error) {
+	j, err := json.Marshal(rowData)
+
+	if err != nil {
+		return &Row{}, err
+	}
+
+	r.PrepareRow(docID, j)
+
+	err = db.Create(&r).Error
+
+	if err != nil {
+		return &Row{}, err
+	}
+
+	return r, nil
+}
+
+func (r *Row) UpdateRow(db *gorm.DB, rowData JSONB) (*Row, error) {
+	j, err := json.Marshal(rowData)
+
+	if err != nil {
+		return &Row{}, err
+	}
+
+	err = db.Model(&Row{}).Where("id = ?", r.ID).Updates(Row{Data: j, UpdatedAt: time.Now()}).Error
+
+	if err != nil {
+		return &Row{}, err
+	}
+
+	r.Data = j
+
+	return r, nil
+}
+
+func (r *Row) DeleteRow(db *gorm.DB, docID uuid.UUID, rowID uint) (int64, error) {
+	dbRow := db.Model(&Row{}).Where("document_id = ? AND id = ?", docID, rowID).Take(&Row{}).Delete(&Row{})
+
+	if dbRow.Error != nil {
+		return 0, db.Error
+	}
+
+	return db.RowsAffected, nil
+}
+
+func (r *Row) SearchRows(db *gorm.DB, docID uuid.UUID, headerInput string, dataInput string) (*[]Row, error) {
+	rows := []Row{}
+
+	err := db.Model(&Row{}).Where("document_id = ?", docID).Find(&rows, datatypes.JSONQuery("data").Equals(dataInput, headerInput)).Error
+
+	if err != nil {
+		return &[]Row{}, err
+	}
+
+	return &rows, nil
 }
