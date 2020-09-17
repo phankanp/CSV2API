@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"runtime"
 	"sync"
 
 	"github.com/gorilla/mux"
@@ -134,43 +135,56 @@ func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Req
 	resCh := make(chan *model.Document)
 	errCh := make(chan error)
 	doneCh := make(chan struct{})
+	filesCh := make(chan map[string]*multipart.FileHeader)
 
 	wg := sync.WaitGroup{}
+	go func() {
+		defer close(filesCh)
+		for i, _ := range files {
+			m := make(map[string]*multipart.FileHeader)
+			m[titles[i]] = files[i]
+			filesCh <- m
+		}
+	}()
+	for i := 0; i < runtime.NumCPU(); i++ {
+		var file *multipart.FileHeader
+		var fname string
 
-	for i, _ := range files {
-		file := files[i]
-		fname := titles[i]
 		wg.Add(1)
 
 		go func(file *multipart.FileHeader, fname string, server *Server, authenticatedUser *model.User) {
 			defer wg.Done()
+			for m := range filesCh {
+				for key, val := range m {
+					file := val
+					fname := key
 
-			f, err := file.Open()
+					f, err := file.Open()
 
-			if err != nil {
-				errCh <- fmt.Errorf("cannot open file: %s", err)
-				return
+					if err != nil {
+						errCh <- fmt.Errorf("cannot open file: %s", err)
+						return
+					}
+
+					defer f.Close()
+
+					doc := model.Document{}
+
+					data, err := doc.CreateDocument(f, fname, server.DB, authenticatedUser)
+
+					if err != nil {
+						errCh <- err
+					}
+
+					resCh <- data
+				}
 			}
-
-			defer f.Close()
-
-			doc := model.Document{}
-
-			data, err := doc.CreateDocument(f, fname, server.DB, authenticatedUser)
-
-			if err != nil {
-				errCh <- err
-			}
-
-			resCh <- data
 		}(file, fname, server, authenticatedUser)
 	}
-
 	go func() {
 		wg.Wait()
 		doneCh <- struct{}{}
 	}()
-
 	for {
 		select {
 		case err := <-errCh:
