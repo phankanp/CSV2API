@@ -17,6 +17,7 @@ import (
 	"github.com/phankanp/csv-to-json/response"
 )
 
+// Get all documents for a user
 func (server *Server) GetDocuments(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -51,6 +52,7 @@ func (server *Server) GetDocuments(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, d)
 }
 
+// Get a single document for a user
 func (server *Server) GetDocument(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -86,6 +88,7 @@ func (server *Server) GetDocument(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, d)
 }
 
+// Concurrently processes uploaded csv files and stores in database
 func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Request) {
 	sessionToken, err := auth.GetSessionToken(r)
 
@@ -132,12 +135,16 @@ func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Req
 
 	documents := make([]*model.Document, 0)
 
+	// Channels which receive files, errors, and results
 	resCh := make(chan *model.Document)
 	errCh := make(chan error)
 	doneCh := make(chan struct{})
 	filesCh := make(chan map[string]*multipart.FileHeader)
 
+	// Variable of type Waitgroup to coordinate goroutine execution
 	wg := sync.WaitGroup{}
+
+	// Anonymous goroutine function which iterates through and sends all uploaded files to the files channel
 	go func() {
 		defer close(filesCh)
 		for i, _ := range files {
@@ -146,19 +153,23 @@ func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Req
 			filesCh <- m
 		}
 	}()
+	// Loop through number of CPU's on machine
 	for i := 0; i < runtime.NumCPU(); i++ {
-		var file *multipart.FileHeader
-		var fname string
 
+		// Add one to wait group to indicate a running goroutine
 		wg.Add(1)
 
-		go func(file *multipart.FileHeader, fname string, server *Server, authenticatedUser *model.User) {
+		// Anonymous goroutine function
+		go func() {
 			defer wg.Done()
+			// Loop through files in files channel
 			for m := range filesCh {
+				// Get file name and file
 				for key, val := range m {
-					file := val
 					fname := key
+					file := val
 
+					// Open file for reading
 					f, err := file.Open()
 
 					if err != nil {
@@ -170,21 +181,25 @@ func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Req
 
 					doc := model.Document{}
 
+					// Create document in database
 					data, err := doc.CreateDocument(f, fname, server.DB, authenticatedUser)
 
 					if err != nil {
 						errCh <- err
 					}
 
+					// Send results of document creation to results channel
 					resCh <- data
 				}
 			}
-		}(file, fname, server, authenticatedUser)
+		}()
 	}
+	// Anonymous goroutine function which blocks until all goroutines and complete and sends a signal to done channel
 	go func() {
 		wg.Wait()
 		doneCh <- struct{}{}
 	}()
+	// Processes responses received from channels and sends json response
 	for {
 		select {
 		case err := <-errCh:
@@ -199,6 +214,7 @@ func (server *Server) UploadHandlerConcurrent(w http.ResponseWriter, r *http.Req
 	}
 }
 
+// Deletes a users document
 func (server *Server) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -245,6 +261,7 @@ func (server *Server) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, "")
 }
 
+// Sequentially processes csv files and stores in database
 func (server *Server) UploadHandler(w http.ResponseWriter, r *http.Request) {
 	sessionToken, err := auth.GetSessionToken(r)
 
@@ -312,6 +329,7 @@ func (server *Server) UploadHandler(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, documents)
 }
 
+// Gets all rows for a document
 func (server *Server) GetDocumentRows(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -360,6 +378,7 @@ func (server *Server) GetDocumentRows(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, rows)
 }
 
+// Creates a new row for a document
 func (server *Server) CreateDocumentRow(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -430,6 +449,7 @@ func (server *Server) CreateDocumentRow(w http.ResponseWriter, r *http.Request) 
 	response.JsonResponse(w, http.StatusOK, createdRow)
 }
 
+// Get a specified row in a document
 func (server *Server) GetDocumentRow(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -483,6 +503,7 @@ func (server *Server) GetDocumentRow(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, retrievedRow)
 }
 
+// Updates a specified document row
 func (server *Server) UpdateDocumentRow(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -560,6 +581,7 @@ func (server *Server) UpdateDocumentRow(w http.ResponseWriter, r *http.Request) 
 	response.JsonResponse(w, http.StatusOK, updatedRow)
 }
 
+// Deletes a specified document row
 func (server *Server) DeleteDocumentRow(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -609,6 +631,7 @@ func (server *Server) DeleteDocumentRow(w http.ResponseWriter, r *http.Request) 
 	response.JsonResponse(w, http.StatusOK, "")
 }
 
+// Search document rows by specified parameters
 func (server *Server) SearchRows(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 

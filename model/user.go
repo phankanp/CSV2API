@@ -2,15 +2,16 @@ package model
 
 import (
 	"errors"
-	"github.com/phankanp/csv-to-json/auth"
 	"strings"
 	"time"
 
 	"github.com/badoux/checkmail"
 	"github.com/pborman/uuid"
+	"github.com/phankanp/csv-to-json/auth"
 	"gorm.io/gorm"
 )
 
+// User model
 type User struct {
 	ID        uuid.UUID `gorm:"primary_key" json:"id"`
 	AuthKey   string    `gorm:"not null;" json:"auth_key"`
@@ -21,6 +22,7 @@ type User struct {
 	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
 }
 
+// Assign data to user model
 func (u *User) Prepare() {
 	u.ID = uuid.NewRandom()
 	u.Username = strings.TrimSpace(u.Username)
@@ -29,6 +31,7 @@ func (u *User) Prepare() {
 	u.UpdatedAt = time.Now()
 }
 
+// Validates user data on registration
 func (u *User) ValidateInput(db *gorm.DB) error {
 	var err error
 
@@ -73,6 +76,7 @@ func (u *User) ValidateInput(db *gorm.DB) error {
 	return nil
 }
 
+// Creates new user in database
 func (u *User) CreateUser(db *gorm.DB) (string, error) {
 	hashedPassword, err := auth.HashPassword(u.Password)
 
@@ -101,6 +105,7 @@ func (u *User) CreateUser(db *gorm.DB) (string, error) {
 	return AuthKey, nil
 }
 
+// Checks user credentials on login
 func (u *User) CheckCredentials(db *gorm.DB, email string, password string) (string, error) {
 	err := db.Model(&User{}).Where("email = ?", email).Take(&u).Error
 
@@ -117,6 +122,7 @@ func (u *User) CheckCredentials(db *gorm.DB, email string, password string) (str
 	return u.Email, nil
 }
 
+// Retrieves user by username
 func (u *User) AuthenticateUser(db *gorm.DB, username string) (*User, error) {
 	err := db.Model(&User{}).Where("username = ?", username).Take(&u).Error
 
@@ -127,6 +133,7 @@ func (u *User) AuthenticateUser(db *gorm.DB, username string) (*User, error) {
 	return u, nil
 }
 
+// Retrieves user by email
 func (u *User) GetUserByEmail(db *gorm.DB, email string) (*User, error) {
 	err := db.Model(&User{}).Where("email = ?", email).Take(&u).Error
 

@@ -19,6 +19,7 @@ type Server struct {
 	Cache  redis.Conn
 }
 
+// Initializes postgres/redis connections and url routes
 func (server *Server) Initialize(config *config.Config) {
 	var err error
 

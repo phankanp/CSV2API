@@ -10,6 +10,7 @@ import (
 	"github.com/phankanp/csv-to-json/response"
 )
 
+// Creates a new user
 func (server *Server) Register(w http.ResponseWriter, r *http.Request) {
 	user := model.User{}
 
@@ -38,6 +39,7 @@ func (server *Server) Register(w http.ResponseWriter, r *http.Request) {
 	response.JsonResponse(w, http.StatusOK, registeredUserAuthKey)
 }
 
+// Login user based on email/password
 func (server *Server) Login(w http.ResponseWriter, r *http.Request) {
 	user := model.User{}
 

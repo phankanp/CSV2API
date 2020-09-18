@@ -14,8 +14,10 @@ import (
 	"github.com/pborman/uuid"
 )
 
+// Maps csv file row data
 type JSONB map[string]interface{}
 
+// CSV file model
 type Document struct {
 	ID        uuid.UUID `gorm:"primary_key;" json:"id"`
 	UserID    uuid.UUID `json:"-"`
@@ -26,6 +28,7 @@ type Document struct {
 	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 }
 
+// CSV row model
 type Row struct {
 	ID         uint           `gorm:"primary_key;auto_increment" json:"id"`
 	DocumentID uuid.UUID      `gorm:"not null" json:"-"`
@@ -34,12 +37,14 @@ type Row struct {
 	UpdatedAt  time.Time      `gorm:"default:CURRENT_TIMESTAMP" json:"-"`
 }
 
+// CSV header model
 type Header struct {
 	ID         uint      `gorm:"primary_key;auto_increment" json:"-"`
 	DocumentID uuid.UUID `gorm:"not null" json:"-"`
 	Name       string    `gorm:"not null" json:"name"`
 }
 
+// Assign data to document model
 func (d *Document) PrepareDocument(fname string, uid uuid.UUID) {
 	d.ID = uuid.NewRandom()
 	d.UserID = uid
@@ -48,6 +53,7 @@ func (d *Document) PrepareDocument(fname string, uid uuid.UUID) {
 	d.UpdatedAt = time.Now()
 }
 
+// Assign data to row model
 func (r *Row) PrepareRow(docID uuid.UUID, data datatypes.JSON) {
 	r.DocumentID = docID
 	r.Data = data
@@ -55,11 +61,13 @@ func (r *Row) PrepareRow(docID uuid.UUID, data datatypes.JSON) {
 	r.UpdatedAt = time.Now()
 }
 
+// Assign data to header model
 func (h *Header) PrepareHeader(docID uuid.UUID, name string) {
 	h.DocumentID = docID
 	h.Name = name
 }
 
+// Creates a document in database
 func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB, authenticatedUser *User) (*Document, error) {
 	var err error
 
@@ -90,6 +98,7 @@ func (d *Document) CreateDocument(file multipart.File, fname string, db *gorm.DB
 	return d, nil
 }
 
+// Converts csv rows to JSONB map and creates document headers
 func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 	r := csv.NewReader(file)
 
@@ -140,6 +149,7 @@ func CSV2Map(file multipart.File, d *Document, db *gorm.DB) error {
 	return nil
 }
 
+// Creates document headers in database
 func (d *Document) CreateHeaders(db *gorm.DB, docHeaders []string) ([]Header, error) {
 	headers := make([]Header, 0)
 
@@ -157,6 +167,7 @@ func (d *Document) CreateHeaders(db *gorm.DB, docHeaders []string) ([]Header, er
 	return headers, nil
 }
 
+// Gets all document for a user
 func (d *Document) GetDocuments(db *gorm.DB, uid uuid.UUID) (*[]Document, error) {
 	documents := []Document{}
 
@@ -169,6 +180,7 @@ func (d *Document) GetDocuments(db *gorm.DB, uid uuid.UUID) (*[]Document, error)
 	return &documents, nil
 }
 
+// Gets a document by id
 func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, error) {
 	var err error
 
@@ -181,6 +193,7 @@ func (d *Document) GetDocumentByID(db *gorm.DB, docID uuid.UUID) (*Document, err
 	return d, nil
 }
 
+// Deletes a document
 func (d *Document) DeleteDocument(db *gorm.DB, docID uuid.UUID) (int64, error) {
 	var err error
 
@@ -205,6 +218,7 @@ func (d *Document) DeleteDocument(db *gorm.DB, docID uuid.UUID) (int64, error) {
 	return db.RowsAffected, nil
 }
 
+// Gets headers for a document
 func (d *Document) GetDocumentHeaders(db *gorm.DB) ([]Header, error) {
 	headers := []Header{}
 
@@ -217,6 +231,7 @@ func (d *Document) GetDocumentHeaders(db *gorm.DB) ([]Header, error) {
 	return headers, nil
 }
 
+// Gets all rows for a document
 func (r *Row) GetAllRowsByDocument(db *gorm.DB, docID uuid.UUID) (*[]Row, error) {
 	rows := []Row{}
 
@@ -229,6 +244,7 @@ func (r *Row) GetAllRowsByDocument(db *gorm.DB, docID uuid.UUID) (*[]Row, error)
 	return &rows, nil
 }
 
+// Gets specified row for a document
 func (r *Row) GetRowByID(db *gorm.DB, docID uuid.UUID, rowID uint) (*Row, error) {
 	err := db.Model(&Row{}).Where("document_id = ? AND id = ?", docID, rowID).Take(&r).Error
 
@@ -239,6 +255,7 @@ func (r *Row) GetRowByID(db *gorm.DB, docID uuid.UUID, rowID uint) (*Row, error)
 	return r, nil
 }
 
+// Creates a new row in a document
 func (r *Row) CreateRow(db *gorm.DB, docID uuid.UUID, rowData JSONB) (*Row, error) {
 	j, err := json.Marshal(rowData)
 
@@ -257,6 +274,7 @@ func (r *Row) CreateRow(db *gorm.DB, docID uuid.UUID, rowData JSONB) (*Row, erro
 	return r, nil
 }
 
+// Updates a row in a document
 func (r *Row) UpdateRow(db *gorm.DB, rowData JSONB) (*Row, error) {
 	j, err := json.Marshal(rowData)
 
@@ -275,6 +293,7 @@ func (r *Row) UpdateRow(db *gorm.DB, rowData JSONB) (*Row, error) {
 	return r, nil
 }
 
+// Deletes a row in a document
 func (r *Row) DeleteRow(db *gorm.DB, docID uuid.UUID, rowID uint) (int64, error) {
 	dbRow := db.Model(&Row{}).Where("document_id = ? AND id = ?", docID, rowID).Take(&Row{}).Delete(&Row{})
 
@@ -285,6 +304,7 @@ func (r *Row) DeleteRow(db *gorm.DB, docID uuid.UUID, rowID uint) (int64, error)
 	return db.RowsAffected, nil
 }
 
+// Searches rows in a documents and return rows matching specified parameters
 func (r *Row) SearchRows(db *gorm.DB, docID uuid.UUID, headerInput string, dataInput string) (*[]Row, error) {
 	rows := []Row{}
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 )
 
+// Gets api key from header and adds to context
 func MiddlewareAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("key")
